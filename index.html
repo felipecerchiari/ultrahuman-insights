@@ -21,18 +21,31 @@
   .pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:650;margin-left:6px}
   .good{background:rgba(74,222,128,.15);color:var(--good)}.warn{background:rgba(251,191,36,.15);color:var(--warn)}
   .bad{background:rgba(248,113,113,.15);color:var(--bad)}.neutral{background:rgba(138,149,163,.15);color:var(--muted)}
+  .radar{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+  .radar .dot{width:14px;height:14px;border-radius:50%;flex:none}
+  .radar .status{font-size:18px;font-weight:680}
+  .sig{font-size:13px;margin:4px 0;color:var(--muted)}
   .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
   .ins{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:11px 14px;margin:8px 0;font-size:14px}
   .ins .r{color:var(--muted);font-size:12px;margin-left:4px}
   table.corr{border-collapse:collapse;font-size:11px;width:100%}
   table.corr th,table.corr td{border:1px solid var(--line);padding:5px 6px;text-align:center}
   table.corr th{color:var(--muted);background:var(--panel2)}table.corr td.lab{text-align:left;color:var(--muted);background:var(--panel2);white-space:nowrap}
-  input,select,button{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:9px 12px;font-size:14px;font-family:inherit}
+  input,select,button,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:9px 12px;font-size:14px;font-family:inherit}
   button{background:var(--accent);color:#04121f;font-weight:650;cursor:pointer;border:none}
+  button:disabled{opacity:.5;cursor:default}
   .muted{color:var(--muted)}.err{color:var(--bad)}
   #gate{max-width:340px;margin:18vh auto 0;text-align:center}
   #gate .panel{display:flex;flex-direction:column;gap:12px}
   .topbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+  #chatlog{display:flex;flex-direction:column;gap:10px;max-height:360px;overflow:auto;margin-bottom:12px}
+  .msg{padding:10px 13px;border-radius:12px;font-size:14px;max-width:85%;white-space:pre-wrap}
+  .msg.u{background:#1f3140;align-self:flex-end;border:1px solid #2a4456}
+  .msg.a{background:var(--panel2);align-self:flex-start;border:1px solid var(--line)}
+  .chatrow{display:flex;gap:8px}
+  .chatrow input{flex:1}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .chip{font-size:12px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:99px;padding:5px 11px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -57,8 +70,23 @@
     </div>
     <p class="sub" id="meta"></p>
 
+    <h2>Radar de saúde</h2>
+    <div class="panel" id="radar"></div>
+
     <h2>Briefing</h2>
     <div class="panel briefing" id="briefing"></div>
+
+    <h2>Pergunte aos seus dados</h2>
+    <div class="panel">
+      <div id="chatlog"></div>
+      <div class="chips" id="chips"></div>
+      <div class="chatrow">
+        <input id="chatq" placeholder="ex: por que meu recovery caiu essa semana?">
+        <button id="chatsend">Enviar</button>
+      </div>
+      <div class="sub" id="chatnote" style="margin:8px 0 0"></div>
+    </div>
+
     <h2>Resumo do período</h2>
     <div class="grid cards" id="cards"></div>
     <h2>Tendências</h2>
@@ -73,7 +101,7 @@
 <script>
 const M=[['sleep_score','Nota de sono','high'],['recovery','Recovery','high'],['hrv','HRV (sono)','high'],['rhr','FC repouso','low'],['total_sleep','Sono total (h)','high'],['deep_sleep','Sono profundo (min)','high'],['rem_sleep','REM (min)','high'],['sleep_eff','Eficiência (%)','high'],['temp_dev','Desvio temp (°C)','low'],['restorative','Sono restaur. (%)','high'],['steps','Passos','high'],['movement','Mov. index','high'],['vo2','VO₂ máx','high'],['active_min','Min. ativos','high']];
 const LAB={}; M.forEach(([id,l,b])=>LAB[id]={l,b});
-let CHARTS=[];
+let CHARTS=[]; let CTX=null; let HISTORY=[];
 
 function $(id){return document.getElementById(id);}
 function pill(c,t){return '<span class="pill '+c+'">'+t+'</span>';}
@@ -82,27 +110,30 @@ function mean(a){const v=clean(a);return v.length?v.reduce((s,x)=>s+x,0)/v.lengt
 function std(a){const v=clean(a);if(v.length<2)return null;const m=mean(v);return Math.sqrt(v.reduce((s,x)=>s+(x-m)*(x-m),0)/(v.length-1));}
 function pear(a,b){const xs=[],ys=[];for(let i=0;i<a.length;i++){if(a[i]!=null&&b[i]!=null&&!isNaN(a[i])&&!isNaN(b[i])){xs.push(a[i]);ys.push(b[i]);}}const n=xs.length;if(n<15)return{r:null,n};const mx=xs.reduce((s,v)=>s+v,0)/n,my=ys.reduce((s,v)=>s+v,0)/n;let nu=0,dx=0,dy=0;for(let i=0;i<n;i++){const A=xs[i]-mx,B=ys[i]-my;nu+=A*B;dx+=A*A;dy+=B*B;}if(!dx||!dy)return{r:null,n};return{r:+(nu/Math.sqrt(dx*dy)).toFixed(3),n};}
 function clsZ(better,val,m,sd){if(val==null||m==null||!sd)return 'neutral';const z=(val-m)/sd;const dir=better==='high'?z:-z;return dir>0.5?'good':dir<-0.5?'bad':'neutral';}
+function col(o,id){return o.map(r=>r[id]);}
 
 async function load(){
   const pw=sessionStorage.getItem('uh_pw')||'';
   const days=$('days').value;
   $('meta').textContent='Carregando…';
-  const r=await fetch('/api/metrics?days='+days+'&pw='+encodeURIComponent(pw));
+  let r;
+  try{ r=await fetch('/api/metrics?days='+days+'&pw='+encodeURIComponent(pw)); }
+  catch(e){ $('meta').innerHTML='<span class="err">Erro de rede.</span>'; return; }
   if(r.status===401){ logout('Senha incorreta.'); return; }
   const j=await r.json();
   render(j);
 }
 function logout(msg){ sessionStorage.removeItem('uh_pw'); $('app').style.display='none'; $('gate').style.display='block'; $('gateerr').textContent=msg||''; }
 
-function col(o,id){return o.map(r=>r[id]);}
-
 function render(j){
   const o=j.records;
   $('meta').textContent='Atualizado '+j.generated+' · '+o.length+' dias com dados.';
   const stats={}; M.forEach(([id,l,b])=>{const c=col(o,id);stats[id]={label:l,better:b,mean:mean(c),std:std(c),min:Math.min(...clean(c)),max:Math.max(...clean(c)),n:clean(c).length};});
+  let last=null; for(let i=o.length-1;i>=0;i--){if(o[i].sleep_score!=null){last=o[i];break;}}
+
+  renderRadar(stats,last,o);
 
   // briefing
-  let last=null; for(let i=o.length-1;i>=0;i--){if(o[i].sleep_score!=null){last=o[i];break;}}
   const bdiv=$('briefing');
   if(!last){ bdiv.innerHTML='<div class="line">Sem noite de sono registrada no período.</div>'; }
   else {
@@ -143,6 +174,63 @@ function render(j){
   let t='<table class="corr"><tr><th></th>'+present.map(p=>'<th>'+p.l+'</th>').join('')+'</tr>';
   present.forEach(A=>{t+='<tr><td class="lab">'+A.l+'</td>';present.forEach(B=>{if(A.id===B.id){t+='<td>—</td>';return;}const {r}=pear(col(o,A.id),col(o,B.id));if(r==null){t+='<td class="muted">·</td>';return;}const a=Math.min(Math.abs(r),1);const c=r>0?'rgba(74,222,128,'+(a*.55)+')':'rgba(248,113,113,'+(a*.55)+')';t+='<td style="background:'+c+'">'+r.toFixed(2)+'</td>';});t+='</tr>';});
   t+='</table>'; $('matrixbox').innerHTML=t;
+
+  // context for chat (compact)
+  const statsLite={}; for(const k in stats){const s=stats[k];statsLite[k]={label:s.label,mean:s.mean!=null?+s.mean.toFixed(1):null,std:s.std!=null?+s.std.toFixed(1):null,min:s.min,max:s.max,n:s.n};}
+  CTX={generated:j.generated, nDays:o.length, baseline:statsLite, last, recent:o.slice(-21), correlacoes:ins.slice(0,12), radar:window.__radar||null};
+}
+
+function renderRadar(stats,last,o){
+  const div=$('radar');
+  if(!last){div.innerHTML='<span class="muted">Sem dados de sono recentes para avaliar.</span>';window.__radar=null;return;}
+  // sinais vs baseline pessoal
+  const defs=[['temp_dev','Temperatura','low'],['rhr','FC de repouso','low'],['hrv','HRV','high']];
+  const flags=[]; const detail=[];
+  defs.forEach(([id,label,better])=>{
+    const v=last[id], st=stats[id]; if(v==null||st.mean==null||!st.std)return;
+    const z=(v-st.mean)/st.std; const bad = better==='high'? -z : z; // positivo = direção ruim
+    let cls='good', word='ok';
+    if(bad>=1.5){cls='bad';word='bem fora do normal';flags.push({label,bad});}
+    else if(bad>=1){cls='warn';word='um pouco fora';flags.push({label,bad});}
+    const disp=id==='temp_dev'?v.toFixed(2)+'°C':Math.round(v);
+    detail.push('<div class="sig">'+pill(cls,label)+' '+disp+' <span class="muted">(média '+(id==='temp_dev'?st.mean.toFixed(2):Math.round(st.mean))+', z='+z.toFixed(1)+') · '+word+'</span></div>');
+  });
+  // tendência de temperatura subindo 3 dias
+  const temps=o.slice(-3).map(r=>r.temp_dev).filter(x=>x!=null);
+  let rising=false; if(temps.length===3 && temps[0]<temps[1] && temps[1]<temps[2] && (temps[2]-temps[0])>0.3) rising=true;
+
+  let status,cls,msg;
+  if(flags.length>=2 || (flags.some(f=>f.bad>=1.5)&&rising)){status='Alerta';cls='bad';msg='Vários sinais fora do seu padrão — pode ser doença chegando, sono ruim acumulado ou overtraining. Priorize descanso, hidratação e observe nas próximas 24-48h.';}
+  else if(flags.length===1 || rising){status='Atenção';cls='warn';msg='Um sinal fora do normal'+(rising?' e temperatura subindo 3 dias seguidos':'')+'. Vale pegar mais leve hoje e acompanhar.';}
+  else {status='Tudo normal';cls='good';msg='Seus sinais fisiológicos estão dentro da sua linha de base.';}
+
+  const dotColor = cls==='bad'?'var(--bad)':cls==='warn'?'var(--warn)':'var(--good)';
+  div.innerHTML='<div class="radar"><span class="dot" style="background:'+dotColor+'"></span><span class="status">'+status+'</span></div>'+
+    '<div class="line" style="margin:8px 0 10px;font-size:14px">'+msg+'</div>'+detail.join('')+
+    (rising?'<div class="sig">'+pill('warn','Temperatura')+' tendência de alta em 3 dias</div>':'');
+  window.__radar={status,signals_off:flags.map(f=>f.label),temp_rising:rising,date:last.date};
+}
+
+// ---- chat ----
+function addMsg(role,text){const d=document.createElement('div');d.className='msg '+(role==='user'?'u':'a');d.textContent=text;$('chatlog').appendChild(d);$('chatlog').scrollTop=$('chatlog').scrollHeight;return d;}
+async function ask(q){
+  if(!q||!CTX)return;
+  $('chatsend').disabled=true; $('chatq').value='';
+  addMsg('user',q);
+  const thinking=addMsg('assistant','…');
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pw:sessionStorage.getItem('uh_pw')||'',question:q,context:CTX,history:HISTORY})});
+    const j=await r.json();
+    if(!r.ok){ thinking.innerHTML='<span class="err">'+(j.error==='server not configured (set UH_PASSWORD and OPENAI_API_KEY env vars)'?'Falta configurar a chave da OpenAI no servidor.':((j.detail||j.error||'erro')))+'</span>'; }
+    else { thinking.textContent=j.answer; HISTORY.push({role:'user',content:q},{role:'assistant',content:j.answer}); if(HISTORY.length>12)HISTORY=HISTORY.slice(-12); }
+  }catch(e){ thinking.innerHTML='<span class="err">Erro de rede.</span>'; }
+  $('chatsend').disabled=false; $('chatq').focus();
+}
+
+function setupChips(){
+  const qs=['Por que meu recovery caiu essa semana?','Qual hábito mais ajuda meu sono?','Como está minha tendência de HRV?','O que devo priorizar hoje?'];
+  $('chips').innerHTML=qs.map(q=>'<span class="chip">'+q+'</span>').join('');
+  [...document.querySelectorAll('.chip')].forEach(c=>c.addEventListener('click',()=>ask(c.textContent)));
 }
 
 function enter(){
@@ -155,6 +243,9 @@ $('enter').addEventListener('click',enter);
 $('pw').addEventListener('keydown',e=>{if(e.key==='Enter')enter();});
 $('refresh').addEventListener('click',load);
 $('days').addEventListener('change',load);
+$('chatsend').addEventListener('click',()=>ask($('chatq').value.trim()));
+$('chatq').addEventListener('keydown',e=>{if(e.key==='Enter')ask($('chatq').value.trim());});
+setupChips();
 if(sessionStorage.getItem('uh_pw')){ $('gate').style.display='none'; $('app').style.display='block'; load(); }
 </script>
 </body>
