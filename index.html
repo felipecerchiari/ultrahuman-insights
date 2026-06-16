@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ultrahuman · Insights</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#0b0d10;--panel:#14181d;--panel2:#1b2027;--line:#262d36;--txt:#e8edf2;--muted:#8a95a3;--accent:#7cc4ff;--good:#4ade80;--warn:#fbbf24;--bad:#f87171}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;line-height:1.45}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 18px 80px}
+  h1{font-size:22px;margin:0 0 2px}h2{font-size:16px;margin:30px 0 12px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .briefing{background:linear-gradient(135deg,#16202b,#141a20);border:1px solid #243140}
+  .briefing .line{margin:6px 0;font-size:14px}
+  .grid{display:grid;gap:14px}.cards{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card .k{font-size:12px;color:var(--muted);margin-bottom:6px}.card .v{font-size:24px;font-weight:680}.card .d{font-size:11px;color:var(--muted);margin-top:3px}
+  .pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:650;margin-left:6px}
+  .good{background:rgba(74,222,128,.15);color:var(--good)}.warn{background:rgba(251,191,36,.15);color:var(--warn)}
+  .bad{background:rgba(248,113,113,.15);color:var(--bad)}.neutral{background:rgba(138,149,163,.15);color:var(--muted)}
+  .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .ins{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:8px;padding:11px 14px;margin:8px 0;font-size:14px}
+  .ins .r{color:var(--muted);font-size:12px;margin-left:4px}
+  table.corr{border-collapse:collapse;font-size:11px;width:100%}
+  table.corr th,table.corr td{border:1px solid var(--line);padding:5px 6px;text-align:center}
+  table.corr th{color:var(--muted);background:var(--panel2)}table.corr td.lab{text-align:left;color:var(--muted);background:var(--panel2);white-space:nowrap}
+  input,select,button{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:9px 12px;font-size:14px;font-family:inherit}
+  button{background:var(--accent);color:#04121f;font-weight:650;cursor:pointer;border:none}
+  .muted{color:var(--muted)}.err{color:var(--bad)}
+  #gate{max-width:340px;margin:18vh auto 0;text-align:center}
+  #gate .panel{display:flex;flex-direction:column;gap:12px}
+  .topbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="gate">
+    <h1>Insights do Anel</h1>
+    <p class="sub">Acesso protegido</p>
+    <div class="panel">
+      <input id="pw" type="password" placeholder="senha" autofocus>
+      <button id="enter">Entrar</button>
+      <div class="err" id="gateerr" style="min-height:16px;font-size:13px"></div>
+    </div>
+  </div>
+
+  <div id="app" style="display:none">
+    <div class="topbar">
+      <h1 style="margin:0">Insights do Anel · Ultrahuman</h1>
+      <select id="days" style="margin-left:auto">
+        <option>30</option><option>60</option><option selected>90</option><option>120</option><option>180</option>
+      </select>
+      <button id="refresh">Atualizar</button>
+    </div>
+    <p class="sub" id="meta"></p>
+
+    <h2>Briefing</h2>
+    <div class="panel briefing" id="briefing"></div>
+    <h2>Resumo do período</h2>
+    <div class="grid cards" id="cards"></div>
+    <h2>Tendências</h2>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))" id="charts"></div>
+    <h2>Correlações &amp; padrões</h2>
+    <p class="sub">Correlação de Pearson sobre os dias com dados. |r|≥0.3. Correlação não é causalidade — trate como pistas.</p>
+    <div id="insights"></div>
+    <div class="panel" style="overflow:auto;margin-top:12px" id="matrixbox"></div>
+  </div>
+</div>
+
+<script>
+const M=[['sleep_score','Nota de sono','high'],['recovery','Recovery','high'],['hrv','HRV (sono)','high'],['rhr','FC repouso','low'],['total_sleep','Sono total (h)','high'],['deep_sleep','Sono profundo (min)','high'],['rem_sleep','REM (min)','high'],['sleep_eff','Eficiência (%)','high'],['temp_dev','Desvio temp (°C)','low'],['restorative','Sono restaur. (%)','high'],['steps','Passos','high'],['movement','Mov. index','high'],['vo2','VO₂ máx','high'],['active_min','Min. ativos','high']];
+const LAB={}; M.forEach(([id,l,b])=>LAB[id]={l,b});
+let CHARTS=[];
+
+function $(id){return document.getElementById(id);}
+function pill(c,t){return '<span class="pill '+c+'">'+t+'</span>';}
+function clean(a){return a.filter(x=>x!=null&&!isNaN(x));}
+function mean(a){const v=clean(a);return v.length?v.reduce((s,x)=>s+x,0)/v.length:null;}
+function std(a){const v=clean(a);if(v.length<2)return null;const m=mean(v);return Math.sqrt(v.reduce((s,x)=>s+(x-m)*(x-m),0)/(v.length-1));}
+function pear(a,b){const xs=[],ys=[];for(let i=0;i<a.length;i++){if(a[i]!=null&&b[i]!=null&&!isNaN(a[i])&&!isNaN(b[i])){xs.push(a[i]);ys.push(b[i]);}}const n=xs.length;if(n<15)return{r:null,n};const mx=xs.reduce((s,v)=>s+v,0)/n,my=ys.reduce((s,v)=>s+v,0)/n;let nu=0,dx=0,dy=0;for(let i=0;i<n;i++){const A=xs[i]-mx,B=ys[i]-my;nu+=A*B;dx+=A*A;dy+=B*B;}if(!dx||!dy)return{r:null,n};return{r:+(nu/Math.sqrt(dx*dy)).toFixed(3),n};}
+function clsZ(better,val,m,sd){if(val==null||m==null||!sd)return 'neutral';const z=(val-m)/sd;const dir=better==='high'?z:-z;return dir>0.5?'good':dir<-0.5?'bad':'neutral';}
+
+async function load(){
+  const pw=sessionStorage.getItem('uh_pw')||'';
+  const days=$('days').value;
+  $('meta').textContent='Carregando…';
+  const r=await fetch('/api/metrics?days='+days+'&pw='+encodeURIComponent(pw));
+  if(r.status===401){ logout('Senha incorreta.'); return; }
+  const j=await r.json();
+  render(j);
+}
+function logout(msg){ sessionStorage.removeItem('uh_pw'); $('app').style.display='none'; $('gate').style.display='block'; $('gateerr').textContent=msg||''; }
+
+function col(o,id){return o.map(r=>r[id]);}
+
+function render(j){
+  const o=j.records;
+  $('meta').textContent='Atualizado '+j.generated+' · '+o.length+' dias com dados.';
+  const stats={}; M.forEach(([id,l,b])=>{const c=col(o,id);stats[id]={label:l,better:b,mean:mean(c),std:std(c),min:Math.min(...clean(c)),max:Math.max(...clean(c)),n:clean(c).length};});
+
+  // briefing
+  let last=null; for(let i=o.length-1;i>=0;i--){if(o[i].sleep_score!=null){last=o[i];break;}}
+  const bdiv=$('briefing');
+  if(!last){ bdiv.innerHTML='<div class="line">Sem noite de sono registrada no período.</div>'; }
+  else {
+    const km=['sleep_score','recovery','hrv','rhr','total_sleep'];
+    let h='<div class="line"><strong>Última noite registrada:</strong> '+last.date+' <span class="muted">(baseline = sua média de '+stats.sleep_score.n+' dias)</span></div>';
+    let tip='';
+    km.forEach(id=>{const v=last[id];if(v==null)return;const st=stats[id];const c=clsZ(st.better,v,st.mean,st.std);const disp=id==='total_sleep'?v.toFixed(1)+'h':Math.round(v);const base=id==='total_sleep'?st.mean.toFixed(1)+'h':Math.round(st.mean);const w=c==='good'?'acima da média':c==='bad'?'abaixo da média':'na média';h+='<div class="line">'+st.label+': <strong>'+disp+'</strong> '+pill(c,w)+' <span class="muted">· média '+base+'</span></div>';if(c==='bad'&&(id==='recovery'||id==='hrv')&&!tip)tip='Seu '+(id==='hrv'?'HRV':'recovery')+' está abaixo do normal — pegue mais leve e priorize sono hoje.';if(c==='bad'&&id==='total_sleep'&&!tip)tip='Dormiu pouco — tente dormir mais cedo hoje.';if(c==='good'&&id==='recovery'&&!tip)tip='Recovery alto — bom dia para treino mais intenso.';});
+    h+='<div class="line" style="margin-top:10px">👉 '+(tip||'Métricas dentro do seu padrão. Dia neutro.')+'</div>';
+    bdiv.innerHTML=h;
+  }
+
+  // cards
+  let cards=''; M.forEach(([id])=>{const st=stats[id];if(st.mean==null)return;const disp=(id==='total_sleep')?st.mean.toFixed(1)+'h':(Math.abs(st.mean)>=10?Math.round(st.mean):st.mean.toFixed(1));cards+='<div class="card"><div class="k">'+st.label+'</div><div class="v">'+disp+'</div><div class="d">min '+st.min+' · max '+st.max+' · n='+st.n+'</div></div>';});
+  $('cards').innerHTML=cards;
+
+  // charts
+  CHARTS.forEach(c=>c.destroy()); CHARTS=[];
+  const cont=$('charts'); cont.innerHTML='';
+  const labels=o.map(r=>r.date.slice(5));
+  [['sleep_score','Nota de sono'],['recovery','Recovery'],['hrv','HRV'],['rhr','FC repouso'],['total_sleep','Sono total (h)'],['temp_dev','Desvio temp']].forEach(p=>{
+    const ser=col(o,p[0]); if(!ser.some(v=>v!=null))return;
+    const box=document.createElement('div');box.className='chartbox';const cv=document.createElement('canvas');box.appendChild(cv);cont.appendChild(box);
+    CHARTS.push(new Chart(cv,{type:'line',data:{labels,datasets:[{label:p[1],data:ser,borderColor:'#7cc4ff',backgroundColor:'rgba(124,196,255,.12)',borderWidth:2,pointRadius:0,tension:.3,spanGaps:true,fill:true}]},options:{responsive:true,plugins:{legend:{labels:{color:'#e8edf2'}}},scales:{x:{ticks:{color:'#8a95a3',maxTicksLimit:8},grid:{color:'#1b2027'}},y:{ticks:{color:'#8a95a3'},grid:{color:'#1b2027'}}}}}));
+  });
+
+  // correlations
+  const present=M.filter(([id])=>stats[id].n>=15).map(([id,l])=>({id,l}));
+  const ins=[];
+  for(let i=0;i<present.length;i++)for(let j2=i+1;j2<present.length;j2++){const A=present[i],B=present[j2];const {r,n}=pear(col(o,A.id),col(o,B.id));if(r!=null&&Math.abs(r)>=0.3)ins.push({a:A.l,b:B.l,r,n,lag:0});}
+  const lp=[['steps','recovery'],['steps','hrv'],['movement','recovery'],['active_min','recovery'],['active_min','hrv'],['total_sleep','recovery']];
+  lp.forEach(([a,b])=>{const x=col(o,a).slice(0,-1),y=col(o,b).slice(1);const {r,n}=pear(x,y);if(r!=null&&Math.abs(r)>=0.3)ins.push({a:LAB[a].l,b:LAB[b].l,r,n,lag:1});});
+  ins.sort((p,q)=>Math.abs(q.r)-Math.abs(p.r));
+  let ib=''; if(!ins.length)ib='<div class="ins">Nenhuma correlação forte no período.</div>';
+  ins.slice(0,12).forEach(it=>{const dir=it.r>0?'sobe junto com':'cai quando sobe';const stg=Math.abs(it.r)>=0.6?'forte':Math.abs(it.r)>=0.45?'moderada':'fraca';const lag=it.lag?' <span class="muted">('+it.a+' de um dia → '+it.b+' no dia seguinte)</span>':'';ib+='<div class="ins"><strong>'+it.b+'</strong> '+dir+' <strong>'+it.a+'</strong> — correlação '+stg+'.'+lag+'<span class="r">r='+it.r+' · n='+it.n+'</span></div>';});
+  $('insights').innerHTML=ib;
+
+  // matrix
+  let t='<table class="corr"><tr><th></th>'+present.map(p=>'<th>'+p.l+'</th>').join('')+'</tr>';
+  present.forEach(A=>{t+='<tr><td class="lab">'+A.l+'</td>';present.forEach(B=>{if(A.id===B.id){t+='<td>—</td>';return;}const {r}=pear(col(o,A.id),col(o,B.id));if(r==null){t+='<td class="muted">·</td>';return;}const a=Math.min(Math.abs(r),1);const c=r>0?'rgba(74,222,128,'+(a*.55)+')':'rgba(248,113,113,'+(a*.55)+')';t+='<td style="background:'+c+'">'+r.toFixed(2)+'</td>';});t+='</tr>';});
+  t+='</table>'; $('matrixbox').innerHTML=t;
+}
+
+function enter(){
+  const pw=$('pw').value.trim(); if(!pw)return;
+  sessionStorage.setItem('uh_pw',pw);
+  $('gate').style.display='none'; $('app').style.display='block';
+  load();
+}
+$('enter').addEventListener('click',enter);
+$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')enter();});
+$('refresh').addEventListener('click',load);
+$('days').addEventListener('change',load);
+if(sessionStorage.getItem('uh_pw')){ $('gate').style.display='none'; $('app').style.display='block'; load(); }
+</script>
+</body>
+</html>
