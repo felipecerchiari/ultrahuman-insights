@@ -3,7 +3,8 @@ import crypto from "node:crypto";
 
 const TOKEN = process.env.UH_TOKEN || "";
 const OPENAI_KEY = process.env.OPENAI_API_KEY || "";
-const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+// WhatsApp uses a faster model to stay within Twilio's ~15s webhook window.
+const MODEL = process.env.WHATSAPP_MODEL || "gpt-5.4";
 const TW_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
 const WEBHOOK_URL = process.env.WEBHOOK_URL || "https://ultrahuman-insights.vercel.app/api/whatsapp";
 const ALLOW = process.env.UH_WA_ALLOW || ""; // optional: "whatsapp:+55..."
@@ -88,7 +89,7 @@ export default async function handler(req, res) {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + OPENAI_KEY },
-      body: JSON.stringify({ model: MODEL, messages: [{ role: "system", content: sys }, { role: "user", content: body.slice(0, 500) }], temperature: 0.4, max_tokens: 320 }),
+      body: JSON.stringify({ model: MODEL, messages: [{ role: "system", content: sys }, { role: "user", content: body.slice(0, 500) }], max_completion_tokens: 700 }),
     });
     const j = await r.json();
     if (!r.ok) { reply(res, "Nao consegui consultar a IA agora (" + ((j.error && j.error.message) || ("HTTP " + r.status)) + ")."); return; }
